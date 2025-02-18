@@ -8,11 +8,11 @@
 		<version>3.4.1</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.draw_a_thang</groupId>
+	<groupId>com.drawathang</groupId>
 	<artifactId>game-server</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>game-server</name>
-	<description>game-server for draw-a-thang</description>
+	<description>game-server for drawathang</description>
 	<url/>
 	<licenses>
 		<license/>
