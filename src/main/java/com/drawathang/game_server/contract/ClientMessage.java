@@ -1,14 +1,14 @@
 package com.drawathang.game_server.contract;
 
-public class ClientMessageProtocol {
+public class ClientMessage {
     private ClientMessageType type;
 
     // Default constructor for JSON deserialization
-    public ClientMessageProtocol() {
+    public ClientMessage() {
     }
 
     // Constructor to initialize with a type
-    public ClientMessageProtocol(ClientMessageType type) {
+    public ClientMessage(ClientMessageType type) {
         this.type = type;
     }
 
@@ -22,3 +22,4 @@ public class ClientMessageProtocol {
         this.type = type;
     }
 }
+

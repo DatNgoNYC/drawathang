@@ -1,50 +1,140 @@
 package com.drawathang.game_server.services;
 
-import com.drawathang.game_server.contract.GameServerMessageProtocol;
-import com.drawathang.game_server.contract.GameServerMessageType;
-import com.drawathang.game_server.contract.GameServerResponse;
-import com.drawathang.game_server.contract.RequiredBroadcastInfo;
+import com.drawathang.game_server.communication.BroadcastService;
+import com.drawathang.game_server.services.domain.Session;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
-@Service
-public class GameServer {
-    private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
+/**
+ * GameServer manages active sessions and game state.
+ * Serving as the main class/entrypoint to our business logic .
+ */
+@Service // Another bean that spring boot manages
+public class GameServer implements IGameServer {
 
-    public GameServerResponse joinServer(String sessionId) {
-        // MAIN TRANSACTION:
-        // Create a Session with the sessionId, then store it.
-        Session session = new Session(sessionId);
-        sessions.put(sessionId, session);
+    /**
+     * Stores active sessions in the lobby by their session IDs.
+     */
+    private final ConcurrentHashMap<String, Session> sessionsInLobby = new ConcurrentHashMap<>();
 
-        // RESPONDING WITH UPDATE:
-        // Create the RequiredBroadcastInfo (list of recipients)
-        List<String> recipients = sessions.keySet().stream().toList();
-        RequiredBroadcastInfo broadcastInfo = new RequiredBroadcastInfo(recipients);
+    /**
+     * Store active rooms on the game server by their room IDs.
+     */
+    private final ConcurrentHashMap<String, Room> roomsMap = new ConcurrentHashMap<>();
 
-        // Create the GameServerApplication payload for the client
-        int sessionsCount = sessions.size();
-        GameServerMessageProtocol payload = new GameServerMessageProtocol(GameServerMessageType.USER_JOINED, sessionsCount);
+    /**
+     * Stores count of sessions on the game server.
+     */
+    private final AtomicInteger totalSessionsCount = new AtomicInteger(0);
 
-        return new GameServerResponse(broadcastInfo, payload);
+    /**
+     * Atomic counter for generating unique event timestamps.
+     */
+    private final AtomicLong atomicTimestamp = new AtomicLong(0);
+
+
+    public void joinServer(String sessionId) {
+        synchronized (sessionsInLobby) {
+
+            // MAIN TRANSACTION:
+            // Create a new session for the player and store it
+            Session session = new Session(sessionId);
+            sessionsInLobby.put(sessionId, session);
+
+            // BROADCAST THE UPDATE:
+            long timestamp = atomicTimestamp.incrementAndGet();
+            List<String> recipients = List.copyOf(sessionsInLobby.keySet());
+
+            BroadcastService.broadcast(recipients, Map.of(
+                    "timestamp", timestamp,
+                    "event", "USER_JOINED",
+                    "sessionsCount", totalSessionsCount.incrementAndGet()
+            ));
+        }
+
     }
 
-    public GameServerResponse leaveServer(String sessionId) {
-        // MAIN TRANSACTION:
-        // Remove the session
-        sessions.remove(sessionId);
+    public void leaveServer(String sessionId) {
+        synchronized (sessionsInLobby) {
 
-        // RESPONDING WITH UPDATE:
-        // Create the RequiredBroadcastInfo (list of recipients)
-        List<String> recipients = sessions.keySet().stream().toList();
-        RequiredBroadcastInfo broadcastInfo = new RequiredBroadcastInfo(recipients);
+            // MAIN TRANSACTION:
+            // Remove the session
+            sessionsInLobby.remove(sessionId);
+            totalSessionsCount.decrementAndGet();
 
-        // Create the GameServerApplication payload for the client
-        int sessionsCount = sessions.size();
-        GameServerMessageProtocol payload = new GameServerMessageProtocol(GameServerMessageType.USER_LEFT, sessionsCount);
+            // BROADCAST THE UPDATE:
+            long timestamp = atomicTimestamp.incrementAndGet();
+            List<String> recipients = List.copyOf(sessionsInLobby.keySet());
 
-        return new GameServerResponse(broadcastInfo, payload);
+            BroadcastService.broadcast(recipients, Map.of(
+                    "timestamp", timestamp,
+                    "event", "USER_LEFT",
+                    "sessionsCount", totalSessionsCount.get()
+            ));
+        }
     }
+
+    public void setUsername(String sessionId, String username) {
+        Session session = this.sessionsInLobby.get(sessionId);
+        session.setUsername(username);
+
+        BroadcastService.broadcast(List.of(session.getSessionId()), Map.of(
+                "event", "USERNAME_UPDATED"
+        ));
+    }
+
+    public void createRoom(String sessionId, String roomName) {
+        Session session = this.sessionsInLobby.remove(sessionId);
+
+        Room room = new Room(roomName, session);
+        this.roomsMap.put(room.getId(), room);
+
+        // Collect room info for broadcast
+        List<Map<String, Object>> roomsInfo = roomsMap.values().stream()
+                .map(r -> Map.of(
+                        "roomId", r.getId(),
+                        "roomName", r.getName(),
+                        "participantCount", r.getPlayers().size()
+                ))
+                .toList();
+
+        List<String> recipients = List.copyOf(sessionsInLobby.keySet());
+
+        BroadcastService.broadcast(recipients, Map.of(
+                "timestamp", this.atomicTimestamp.incrementAndGet(),
+                "event", "ROOM_CREATED",
+                "sessionsCount", totalSessionsCount.get(),
+                "roomsInfo", roomsInfo
+        ));
+    }
+
+    public void leaveRoom(String sessionId, String roomId) {
+        Room room = roomsMap.get(roomId);
+        Session session = room.leave(sessionId);
+        this.sessionsInLobby.put(sessionId, session);
+
+        List<String> recipients = List.copyOf(sessionsInLobby.keySet());
+
+        // Collect room info for broadcast
+        List<Map<String, Object>> roomsInfo = roomsMap.values().stream()
+                .map(r -> Map.of(
+                        "roomId", r.getId(),
+                        "roomName", r.getName(),
+                        "participantCount", r.getPlayers().size()
+                ))
+                .toList();
+
+        BroadcastService.broadcast(recipients, Map.of(
+                "timestamp", this.atomicTimestamp.incrementAndGet(),
+                "event", "ROOM_UPDATE",
+                "sessionsCount", totalSessionsCount.get(),
+                "roomsInfo", roomsInfo
+        ));    }
+
 }
