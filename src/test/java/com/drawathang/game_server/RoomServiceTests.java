@@ -14,6 +14,7 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -95,7 +96,103 @@ public class RoomServiceTests {
         WebSocketSession session1 = client.execute(handler1, new WebSocketHttpHeaders(), uri).get();
         WebSocketSession session2 = client.execute(handler2, new WebSocketHttpHeaders(), uri).get();
 
+        CountDownLatch handler1Latch = new CountDownLatch(2);
+        handler1.setLatch(handler1Latch);
+
         String joinMessage = JsonUtil.toJson(Map.of("type", "JOIN_SERVER"));
+        session1.sendMessage(new TextMessage(joinMessage));
+        String setUsername = JsonUtil.toJson(Map.of("type", "SET_USERNAME", "username", "datngo"));
+        session1.sendMessage(new TextMessage(setUsername));
+
+        assertTrue(handler1Latch.await(1, TimeUnit.SECONDS));
+
+        System.out.println(handler1.getMessages());
+    }
+
+    @Test
+    void testJoinAndLeaveRooms() throws Exception {
+        // Set up websocket client sessions
+        WebSocketClient client = new StandardWebSocketClient();
+        URI uri = new URI("ws://localhost:" + port + "/game-server");
+
+        TestClientWebSocketHandler handler1 = new TestClientWebSocketHandler();
+        TestClientWebSocketHandler handler2 = new TestClientWebSocketHandler();
+
+        WebSocketSession session1 = client.execute(handler1, new WebSocketHttpHeaders(), uri).get();
+        WebSocketSession session2 = client.execute(handler2, new WebSocketHttpHeaders(), uri).get();
+
+        String joinMessage = JsonUtil.toJson(Map.of("type", "JOIN_SERVER"));
+
+        CountDownLatch globalLatch = new CountDownLatch(3);
+        handler1.setLatch(globalLatch);
+        handler2.setLatch(globalLatch);
+
+        session1.sendMessage(new TextMessage(joinMessage));
+        session2.sendMessage(new TextMessage(joinMessage));
+        assertTrue(globalLatch.await(1, TimeUnit.SECONDS));
+
+        String setUsername = JsonUtil.toJson(Map.of("type", "SET_USERNAME", "username", "datngo"));
+        CountDownLatch handler1Latch = new CountDownLatch(1);
+        handler1.setLatch(handler1Latch);
+        session1.sendMessage(new TextMessage(setUsername));
+        assertTrue(handler1Latch.await(1, TimeUnit.SECONDS));
+
+        String createRoomMessage = JsonUtil.toJson(Map.of("type", "CREATE_ROOM", "roomName", "testroom"));
+        globalLatch = new CountDownLatch(2);
+        handler1.setLatch(globalLatch);
+        handler2.setLatch(globalLatch);
+        session1.sendMessage(new TextMessage(createRoomMessage));
+
+        assertTrue(globalLatch.await(1, TimeUnit.SECONDS));
+
+        List<String> messages = handler2.getMessages();
+
+        // Loop through to find the message that contains the roomId
+        String roomId = null;
+        for (String msg : handler2.getMessages()) {
+            Map<String, Object> parsed = JsonUtil.fromJson(msg, Map.class);
+
+            // Check if this is the ROOM_CREATED message
+            if ("ROOM_CREATED".equals(parsed.get("event"))) {
+                List<Map<String, Object>> roomsInfo = (List<Map<String, Object>>) parsed.get("roomsInfo");
+                if (roomsInfo != null && !roomsInfo.isEmpty()) {
+                    roomId = (String) roomsInfo.get(0).get("roomId");
+                    break;
+                }
+            }
+        }
+
+        System.out.println(roomId);
+        System.out.println(handler1.getMessages());
+        System.out.println(handler2.getMessages());
+
+        globalLatch = new CountDownLatch(2);
+        handler2.setLatch(globalLatch);
+        handler1.setLatch(globalLatch);
+        String joinRoomMessage = JsonUtil.toJson(Map.of("type", "JOIN_ROOM", "roomId", roomId));
+        session2.sendMessage(new TextMessage(joinRoomMessage));
+        assertTrue(globalLatch.await(1, TimeUnit.SECONDS));
+
+        System.out.println(handler1.getMessages());
+        System.out.println(handler2.getMessages());
+
+        handler1.resetMessages();
+        handler2.resetMessages();
+
+        globalLatch = new CountDownLatch(2);
+        handler2.setLatch(globalLatch);
+        handler1.setLatch(globalLatch);
+        String leaveRoomMessage = JsonUtil.toJson(Map.of("type", "LEAVE_ROOM"));
+        session2.sendMessage(new TextMessage(leaveRoomMessage));
+        assertTrue(globalLatch.await(1, TimeUnit.SECONDS));
+
+        System.out.println(handler1.getMessages());
+        System.out.println(handler2.getMessages());
+
+    }
+
+    @Test
+    void testSubmittingGuesses() throws Exception {
 
     }
 }

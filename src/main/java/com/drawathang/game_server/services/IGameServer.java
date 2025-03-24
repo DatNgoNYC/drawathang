@@ -25,9 +25,11 @@ public interface IGameServer {
 
     void joinRoom(String sessionId, String roomId);
 
-    void leaveRoom(String sessionId, String roomId);
+    void leaveRoom(String sessionId);
 
     void submitGuess(String sessionId, String guess);
+
+//    void drawAction(String sessionId, DrawEvent drawEvent);
 
 //
 //    /* ROOM IMPLEMENTATION BELOW:  */

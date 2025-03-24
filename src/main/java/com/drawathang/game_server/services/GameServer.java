@@ -1,6 +1,7 @@
 package com.drawathang.game_server.services;
 
 import com.drawathang.game_server.communication.BroadcastService;
+import com.drawathang.game_server.services.domain.DrawEvent;
 import com.drawathang.game_server.services.domain.Session;
 import org.springframework.stereotype.Service;
 
@@ -9,7 +10,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
 /**
  * GameServer manages active sessions and game state.
@@ -18,15 +18,12 @@ import java.util.stream.Collectors;
 @Service // Another bean that spring boot manages
 public class GameServer implements IGameServer {
 
+    private final RoomService roomService = new RoomService();
+
     /**
      * Stores active sessions in the lobby by their session IDs.
      */
     private final ConcurrentHashMap<String, Session> sessionsInLobby = new ConcurrentHashMap<>();
-
-    /**
-     * Store active rooms on the game server by their room IDs.
-     */
-    private final ConcurrentHashMap<String, Room> roomsMap = new ConcurrentHashMap<>();
 
     /**
      * Stores count of sessions on the game server.
@@ -69,11 +66,10 @@ public class GameServer implements IGameServer {
             totalSessionsCount.decrementAndGet();
 
             // BROADCAST THE UPDATE:
-            long timestamp = atomicTimestamp.incrementAndGet();
             List<String> recipients = List.copyOf(sessionsInLobby.keySet());
 
             BroadcastService.broadcast(recipients, Map.of(
-                    "timestamp", timestamp,
+                    "timestamp", atomicTimestamp.incrementAndGet(),
                     "event", "USER_LEFT",
                     "sessionsCount", totalSessionsCount.get()
             ));
@@ -85,24 +81,18 @@ public class GameServer implements IGameServer {
         session.setUsername(username);
 
         BroadcastService.broadcast(List.of(session.getSessionId()), Map.of(
-                "event", "USERNAME_UPDATED"
+                "event", "USERNAME_UPDATED",
+                "username", username
         ));
     }
 
     public void createRoom(String sessionId, String roomName) {
         Session session = this.sessionsInLobby.remove(sessionId);
 
-        Room room = new Room(roomName, session);
-        this.roomsMap.put(room.getId(), room);
+        this.roomService.createRoom(session, roomName);
 
         // Collect room info for broadcast
-        List<Map<String, Object>> roomsInfo = roomsMap.values().stream()
-                .map(r -> Map.of(
-                        "roomId", r.getId(),
-                        "roomName", r.getName(),
-                        "participantCount", r.getPlayers().size()
-                ))
-                .toList();
+        List<Map<String, Object>> roomsInfo = roomService.getRoomsInfo();
 
         List<String> recipients = List.copyOf(sessionsInLobby.keySet());
 
@@ -114,27 +104,46 @@ public class GameServer implements IGameServer {
         ));
     }
 
-    public void leaveRoom(String sessionId, String roomId) {
-        Room room = roomsMap.get(roomId);
-        Session session = room.leave(sessionId);
+    public void joinRoom(String sessionId, String roomId) {
+        Session session = this.sessionsInLobby.remove(sessionId);
+        this.roomService.joinRoom(session, roomId);
+
+        // Collect room info for broadcast
+        List<Map<String, Object>> roomsInfo = roomService.getRoomsInfo();
+
+        List<String> recipients = List.copyOf(sessionsInLobby.keySet());
+
+        BroadcastService.broadcast(recipients, Map.of(
+                "timestamp", this.atomicTimestamp.incrementAndGet(),
+                "event", "ROOMS_UPDATE",
+                "sessionsCount", totalSessionsCount.get(),
+                "roomsInfo", roomsInfo
+        ));
+    }
+
+    public void leaveRoom(String sessionId) {
+        Session session = roomService.leaveRoom(sessionId);
         this.sessionsInLobby.put(sessionId, session);
 
         List<String> recipients = List.copyOf(sessionsInLobby.keySet());
 
         // Collect room info for broadcast
-        List<Map<String, Object>> roomsInfo = roomsMap.values().stream()
-                .map(r -> Map.of(
-                        "roomId", r.getId(),
-                        "roomName", r.getName(),
-                        "participantCount", r.getPlayers().size()
-                ))
-                .toList();
+        List<Map<String, Object>> roomsInfo = roomService.getRoomsInfo();
 
         BroadcastService.broadcast(recipients, Map.of(
                 "timestamp", this.atomicTimestamp.incrementAndGet(),
-                "event", "ROOM_UPDATE",
+                "event", "ROOMS_UPDATE",
                 "sessionsCount", totalSessionsCount.get(),
                 "roomsInfo", roomsInfo
-        ));    }
+        ));
+    }
+
+    public void submitGuess(String sessionId, String guess) {
+        roomService.submitGuess(sessionId, guess);
+    }
+
+    public void submitDrawEvent(String sessionId, DrawEvent drawEvent) {
+        roomService.submitDrawEvent(sessionId, drawEvent);
+    }
 
 }

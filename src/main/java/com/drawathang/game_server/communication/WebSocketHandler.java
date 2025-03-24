@@ -5,6 +5,7 @@ import com.drawathang.game_server.contract.GameServerMessage;
 import com.drawathang.game_server.contract.GameServerResponse;
 import com.drawathang.game_server.contract.RequiredBroadcastInfo;
 import com.drawathang.game_server.services.GameServer;
+import com.drawathang.game_server.services.domain.DrawEvent;
 import com.drawathang.game_server.util.JsonUtil;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
@@ -107,7 +108,20 @@ public class WebSocketHandler extends TextWebSocketHandler {
                 this.gameServer.setUsername(session.getId(), (String) clientMessageMap.get("username"));
                 break;
 
+            case "JOIN_ROOM":
+                this.gameServer.joinRoom(session.getId(), (String) clientMessageMap.get("roomId"));
+                break;
 
+            case "LEAVE_ROOM":
+                this.gameServer.leaveRoom(session.getId());
+                break;
+
+            case "SUBMIT_GUESS":
+                this.gameServer.submitGuess(session.getId(), (String) clientMessageMap.get("guess"));
+                break;
+
+            case "DRAW_EVENT":
+                this.gameServer.submitDrawEvent(session.getId(), (DrawEvent) clientMessageMap.get("drawEvent"));
 
             default:
                 session.sendMessage(new TextMessage("Not a valid message."));
